@@ -1,0 +1,165 @@
+name: 🔄 Sync Upstream Releases & Assets (Official GH CLI)
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 3 * * *'
+
+# ----------------------------------------------------
+# ⚠️!! 请在这里修改上游仓库的路径 !!
+env:
+  UPSTREAM_REPO: 'PBH-BTN/PeerBanHelper'
+# ----------------------------------------------------
+
+jobs:
+  # --- 作业 1: 检查有哪些 Releases 缺失 ---
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      missing_tags: ${{ steps.check_tags.outputs.MISSING_TAGS }}
+
+    steps:
+      - name: 1. 检查缺失的 Release 标签 (按顺序)
+        id: check_tags
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWN_REPO: ${{ github.repository }}
+        run: |
+          echo "Fetching releases from upstream: $UPSTREAM_REPO"
+          # ⚠️ 限制提高到 300
+          gh release list --repo $UPSTREAM_REPO --limit 300 --json tagName --jq '.[] | .tagName' > upstream_tags_raw.txt
+          
+          echo "Fetching releases from own repo: $OWN_REPO"
+          gh release list --repo $OWN_REPO --limit 300 --json tagName --jq '.[] | .tagName' > own_tags.txt
+
+          sort -V upstream_tags_raw.txt > upstream_tags.txt
+
+          echo "Comparing tags..."
+          comm -23 upstream_tags.txt <(sort -V own_tags.txt) > missing_tags.txt
+
+          if [ ! -s missing_tags.txt ]; then
+            echo "✅ Releases are already in sync."
+            echo "MISSING_TAGS=''" >> $GITHUB_OUTPUT
+          else
+            echo "🔔 Found missing tags (oldest to newest):"
+            cat missing_tags.txt
+            {
+              echo 'MISSING_TAGS<<EOF'
+              cat missing_tags.txt
+              echo 'EOF'
+            } >> $GITHUB_OUTPUT
+          fi
+
+  # --- 作业 2: 同步缺失的 Releases (按顺序) ---
+  sync:
+    needs: check
+    if: needs.check.outputs.missing_tags != ''
+
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: "2. 循环同步 Release (从旧到新)"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWN_REPO: ${{ github.repository }}
+          TAG_LIST: ${{ needs.check.outputs.missing_tags }}
+        run: |
+          echo "$TAG_LIST" | while read TAG_TO_SYNC; do
+            if [ -z "$TAG_TO_SYNC" ]; then continue; fi
+
+            echo "================================================="
+            echo "Syncing release for tag: $TAG_TO_SYNC"
+            
+            # --- 步骤 2.1: 获取上游 Release 详细信息 ---
+            echo "--- Fetching release metadata from $UPSTREAM_REPO ---"
+            if ! gh release view $TAG_TO_SYNC --repo $UPSTREAM_REPO \
+              --json name,body,isPrerelease,targetCommitish > release_details.json; then
+              
+                echo "⚠️ ERROR: 无法获取 $TAG_TO_SYNC 的详情。"
+                echo "这可能是一个 '草稿' (Draft) 或已损坏的 Release。正在跳过..."
+                continue
+            fi
+
+            # --- 步骤 2.2: 准备 gh 命令的参数 ---
+            TITLE=$(jq -r .name release_details.json)
+            NOTES_FILE="notes.txt"
+
+            # 1. 先写入 "Synced from"
+            echo -e "Synced from https://github.com/$UPSTREAM_REPO\n\n" > $NOTES_FILE
+            
+            # 2. 再追加上游的原始 body
+            jq -r .body release_details.json >> $NOTES_FILE
+
+            IS_PRERELEASE=$(jq .isPrerelease release_details.json)
+            TARGET_SHA=$(jq -r .targetCommitish release_details.json)
+            
+            EXTRA_ARGS=""
+            if [[ "$IS_PRERELEASE" == "true" ]]; then
+              EXTRA_ARGS="--prerelease"
+            fi
+
+            # --- 步骤 2.3: 在当前仓库创建 Release (仅元数据) ---
+            echo "--- Creating release metadata in $OWN_REPO ---"
+            gh release create $TAG_TO_SYNC \
+              --repo $OWN_REPO \
+              --title "$TITLE" \
+              --notes-file $NOTES_FILE \
+              --target $TARGET_SHA \
+              $EXTRA_ARGS
+
+            echo "--- Created metadata for release: $TAG_TO_SYNC"
+
+            # --- 步骤 2.4: 下载上游 Release 的所有附件 ---
+            echo "--- Downloading assets from $UPSTREAM_REPO ---"
+            mkdir -p ./temp_assets
+            gh release download $TAG_TO_SYNC --repo $UPSTREAM_REPO --dir ./temp_assets
+
+            # --- 步骤 2.5: 上传附件到新创建的 Release ---
+            if [ -z "$(ls -A ./temp_assets)" ]; then
+               echo "No assets found for this release."
+            else
+               echo "--- Uploading assets to $OWN_REPO ---"
+               gh release upload $TAG_TO_SYNC --repo $OWN_REPO --clber ./temp_assets/*
+               echo "✅ Synced release with assets: $TAG_TO_SYNC"
+            fi
+            
+            rm -f release_details.json notes.txt
+            rm -rf ./temp_assets
+          done # 循环结束
+
+  # --- 作业 3：修复 "Latest" 标签 ---
+  fix_latest:
+    needs: sync
+    if: always() 
+    
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      
+    steps:
+      - name: 3. 修正 "Latest" 标签
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWN_REPO: ${{ github.repository }}
+        run: |
+          echo "Checking upstream for 'Latest' release..."
+          LATEST_TAG=$(gh release list --repo $UPSTREAM_REPO --limit 1 --json tagName --jq '.[0].tagName')
+          
+          if [ -z "$LATEST_TAG" ]; then
+            echo "Upstream has no 'Latest' release defined. Skipping."
+            exit 0
+          fi
+          
+          echo "Upstream 'Latest' tag is: $LATEST_TAG"
+          
+          echo "Setting '$LATEST_TAG' as 'Latest' on $OWN_REPO"
+          if ! gh release view $LATEST_TAG --repo $OWN_REPO > /dev/null; then
+            echo "⚠️ ERROR: 'Latest' tag ($LATEST_TAG) was not successfully synced to $OWN_REPO. Skipping 'latest' update."
+            exit 0
+          fi
+
+          gh release edit $LATEST_TAG --repo $OWN_REPO --latest
+          
+          echo "✅ 'Latest' tag successfully set to $LATEST_TAG."
