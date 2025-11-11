@@ -6,7 +6,7 @@ on:
     - cron: '0 3 * * *'
 
 # ----------------------------------------------------
-# ⚠️!! 请在这里修改上游仓库的路径 !!
+# ⚠️!! 上游仓库地址已更新 !!
 env:
   UPSTREAM_REPO: 'PBH-BTN/PeerBanHelper'
 # ----------------------------------------------------
@@ -26,16 +26,27 @@ jobs:
           OWN_REPO: ${{ github.repository }}
         run: |
           echo "Fetching releases from upstream: $UPSTREAM_REPO"
-          # ⚠️ 限制提高到 300
           gh release list --repo $UPSTREAM_REPO --limit 300 --json tagName --jq '.[] | .tagName' > upstream_tags_raw.txt
           
           echo "Fetching releases from own repo: $OWN_REPO"
           gh release list --repo $OWN_REPO --limit 300 --json tagName --jq '.[] | .tagName' > own_tags.txt
 
-          sort -V upstream_tags_raw.txt > upstream_tags.txt
+          # ----------------------------------------------------
+          # ⚠️!! 这就是修正的地方 !!
+          # vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+          # 'sort -V' 改回 'sort'，以兼容 'comm' 命令
+          sort upstream_tags_raw.txt > upstream_tags.txt
+          # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+          # ----------------------------------------------------
 
           echo "Comparing tags..."
-          comm -23 upstream_tags.txt <(sort -V own_tags.txt) > missing_tags.txt
+          # ----------------------------------------------------
+          # ⚠️!! 这也是修正的地方 !!
+          # vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+          # 'sort -V' 改回 'sort'
+          comm -23 upstream_tags.txt <(sort own_tags.txt) > missing_tags.txt
+          # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+          # ----------------------------------------------------
 
           if [ ! -s missing_tags.txt ]; then
             echo "✅ Releases are already in sync."
@@ -92,7 +103,7 @@ jobs:
             # 2. 再追加上游的原始 body
             jq -r .body release_details.json >> $NOTES_FILE
 
-            IS_PRERELEASE=$(jq .isPrerelease release_details.json)
+            IS_PRERELEASE=$(jq -r .isPrerelease release_details.json)
             TARGET_SHA=$(jq -r .targetCommitish release_details.json)
             
             EXTRA_ARGS=""
@@ -121,7 +132,7 @@ jobs:
                echo "No assets found for this release."
             else
                echo "--- Uploading assets to $OWN_REPO ---"
-               gh release upload $TAG_TO_SYNC --repo $OWN_REPO --clber ./temp_assets/*
+               gh release upload $TAG_TO_SYNC --repo $OWN_REPO --clobber ./temp_assets/*
                echo "✅ Synced release with assets: $TAG_TO_SYNC"
             fi
             
