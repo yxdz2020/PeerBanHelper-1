@@ -1,9 +1,11 @@
 package com.ghostchu.peerbanhelper.module.impl.webapi;
 
+import com.ghostchu.peerbanhelper.bittorrent.peer.PeerFlag;
 import com.ghostchu.peerbanhelper.database.dao.impl.HistoryDao;
 import com.ghostchu.peerbanhelper.database.dao.impl.PeerRecordDao;
 import com.ghostchu.peerbanhelper.database.dao.impl.TrafficJournalDao;
 import com.ghostchu.peerbanhelper.module.AbstractFeatureModule;
+import com.ghostchu.peerbanhelper.module.impl.monitor.ActiveMonitoringModule;
 import com.ghostchu.peerbanhelper.module.impl.webapi.dto.SimpleLongIntKVDTO;
 import com.ghostchu.peerbanhelper.module.impl.webapi.dto.SimpleStringIntKVDTO;
 import com.ghostchu.peerbanhelper.text.Lang;
@@ -16,8 +18,10 @@ import com.ghostchu.peerbanhelper.util.ipdb.IPGeoData;
 import com.ghostchu.peerbanhelper.web.JavalinWebContainer;
 import com.ghostchu.peerbanhelper.web.Role;
 import com.ghostchu.peerbanhelper.web.wrapper.StdResp;
+import com.j256.ormlite.dao.RawRowMapper;
 import com.j256.ormlite.stmt.SelectArg;
 import io.javalin.http.Context;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +29,7 @@ import org.springframework.stereotype.Component;
 
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.sql.SQLException;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
@@ -49,6 +54,8 @@ public final class PBHChartController extends AbstractFeatureModule {
     private TrafficJournalDao trafficJournalDao;
     @Autowired
     private IPDBManager iPDBManager;
+    @Autowired
+    private ActiveMonitoringModule activeMonitoringModule;
 
     @Override
     public boolean isConfigurable() {
@@ -71,8 +78,126 @@ public final class PBHChartController extends AbstractFeatureModule {
                 .get("/api/chart/geoIpInfo", this::handleGeoIP, Role.USER_READ, Role.PBH_PLUS)
                 .get("/api/chart/trend", this::handlePeerTrends, Role.USER_READ, Role.PBH_PLUS)
                 .get("/api/chart/traffic", this::handleTrafficClassic, Role.USER_READ, Role.PBH_PLUS)
+                .get("/api/chart/sessionBetween", this::handleSessionBetween, Role.USER_READ, Role.PBH_PLUS)
+                .get("/api/chart/sessionDayBucket", this::handleSessionDayBucket, Role.USER_READ, Role.PBH_PLUS)
         ;
     }
+
+    private void handleSessionBetween(@NotNull Context ctx) throws SQLException {
+        var timeQueryModel = WebUtil.parseTimeQueryModel(ctx);
+        String downloader = ctx.queryParam("downloader");
+        if (downloader == null || downloader.isBlank()) {
+            downloader = "%";
+        }
+        // 从 startAt 到 endAt，每天的开始时间戳
+        var queryBuilder = peerRecordDao.queryBuilder();
+        var where = queryBuilder
+                .selectColumns("address")
+                .distinct()
+                .where();
+        where.and(where.like("downloader", downloader), where.or(where.between("firstTimeSeen", timeQueryModel.startAt(), timeQueryModel.endAt()),
+                where.between("lastTimeSeen", timeQueryModel.startAt(), timeQueryModel.endAt())));
+        ctx.json(new StdResp(true, null, queryBuilder.countOf()));
+    }
+
+    private void handleSessionDayBucket(@NotNull Context ctx) throws Exception {
+        var timeQueryModel = WebUtil.parseTimeQueryModel(ctx);
+        String downloader = ctx.queryParam("downloader");
+        String downloaderParam = (downloader == null || downloader.isBlank()) ? null : downloader;
+        long startAtTs = timeQueryModel.startAt().getTime();
+        long endAtTs = timeQueryModel.endAt().getTime();
+        Map<Long, SessionTimeRangeCounter> sessionDayBucket = new LinkedHashMap<>();
+        String sql = """
+                SELECT address, firstTimeSeen, lastTimeSeen, lastFlags FROM peer_records
+                WHERE (? IS NULL OR downloader = ?) AND firstTimeSeen BETWEEN ? AND ?
+                UNION
+                SELECT address, firstTimeSeen, lastTimeSeen, lastFlags FROM peer_records
+                WHERE (? IS NULL OR downloader = ?) AND lastTimeSeen BETWEEN ? AND ?
+                """;
+        String[] args = {
+                downloaderParam, downloaderParam, String.valueOf(startAtTs), String.valueOf(endAtTs),
+                downloaderParam, downloaderParam, String.valueOf(startAtTs), String.valueOf(endAtTs)
+        };
+        try (var results = peerRecordDao.queryRaw(sql, timeRangeMapper, args)) {
+            for (SessionTimeRange row : results) {
+                long firstDay = MiscUtil.getStartOfToday(row.firstTimeSeen);
+                long lastDay = MiscUtil.getStartOfToday(row.lastTimeSeen);
+
+                for (long day = firstDay; day <= lastDay; day += 86400000L) {
+                    var counter = sessionDayBucket.computeIfAbsent(day, k -> new SessionTimeRangeCounter());
+                    counter.total.incrementAndGet();
+                    if (row.lastFlags != null && !row.lastFlags.isBlank() && !(new PeerFlag(row.lastFlags).isLocalConnection())) {
+                        counter.incoming.incrementAndGet();
+                    }
+                }
+            }
+        }
+        ctx.json(new StdResp(true, null, sessionDayBucket.entrySet().stream()
+                .map(e -> new SessionDayBucketDTO(e.getKey(), e.getValue().total.intValue(), e.getValue().incoming.intValue()))
+                .sorted(Comparator.comparingLong(SessionDayBucketDTO::key))
+                .toList()));
+    }
+
+    public record SessionDayBucketDTO(long key, long total, long incoming) {
+
+    }
+
+
+    private static class SessionTimeRangeCounter {
+        @Getter
+        private final AtomicInteger total = new AtomicInteger(0);
+        @Getter
+        private final AtomicInteger incoming = new AtomicInteger(0);
+    }
+
+    private static class SessionTimeRange {
+        private String address; // 虽然 Java 循环中不用，但 Mapper 需要接收
+        private long firstTimeSeen;
+        private long lastTimeSeen;
+        private String lastFlags;
+    }
+
+    private final RawRowMapper<SessionTimeRange> timeRangeMapper =
+            (columnNames, resultColumns) -> {
+                SessionTimeRange range = new SessionTimeRange();
+                range.address = resultColumns[0];
+                range.firstTimeSeen = Long.parseLong(resultColumns[1]);
+                range.lastTimeSeen = Long.parseLong(resultColumns[2]);
+                range.lastFlags = resultColumns[3];
+                return range;
+            };
+
+//    private void handleSessionDayBucket(@NotNull Context ctx) throws Exception {
+//        var timeQueryModel = WebUtil.parseTimeQueryModel(ctx);
+//        String downloader = ctx.queryParam("downloader");
+//        // 从 startAt 到 endAt，每天的开始时间戳
+//        var queryBuilder = peerRecordDao.queryBuilder();
+//        // 按天划分，每天的会话数量
+//        var where = queryBuilder
+//                .selectColumns("address", "firstTimeSeen", "lastTimeSeen")
+//                .distinct()
+//                .where();
+//        var subwhere = downloader == null || downloader.isBlank() ? where.raw("1=1") : where.like("downloader", downloader);
+//        where.and(subwhere, where.or(where.between("firstTimeSeen", timeQueryModel.startAt(), timeQueryModel.endAt()),
+//                where.between("lastTimeSeen", timeQueryModel.startAt(), timeQueryModel.endAt())));
+//        Map<Long, AtomicInteger> sessionDayBucket = new LinkedHashMap<>();
+//        long startAt = System.currentTimeMillis();
+//        try (var it = queryBuilder.iterator()) {
+//            while (it.hasNext()) {
+//                var record = it.next();
+//                long firstDay = MiscUtil.getStartOfToday(record.getFirstTimeSeen().getTime());
+//                long lastDay = MiscUtil.getStartOfToday(record.getLastTimeSeen().getTime());
+//                for (long day = firstDay; day <= lastDay; day += 86400000L) {
+//                    sessionDayBucket.computeIfAbsent(day, k -> new AtomicInteger()).incrementAndGet();
+//                }
+//            }
+//            System.out.println("Iterator cost: "+ (System.currentTimeMillis() - startAt)+"ms");
+//            ctx.json(new StdResp(true, null, sessionDayBucket.entrySet().stream()
+//                    .map(e -> new SimpleLongIntKVDTO(e.getKey(), e.getValue().intValue()))
+//                    .sorted(Comparator.comparingLong(SimpleLongIntKVDTO::key))
+//                    .toList()));
+//        }
+//    }
 
     private void handleTraffic(Context ctx) throws Exception {
         var timeQueryModel = WebUtil.parseTimeQueryModel(ctx);
