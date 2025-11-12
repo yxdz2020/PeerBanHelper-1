@@ -179,6 +179,7 @@ public final class PBHPeerController extends AbstractFeatureModule {
                 .addMapping("torrent.size", "torrentSize")
                 .addMapping("module.name", "module")
                 .addMapping("rule.rule", "rule")
+                .addMapping("port", "peerPort")
                 .apply(historyDao.queryBuilder().join(torrentDao.queryBuilder().setAlias("torrent"), QueryBuilder.JoinType.LEFT, QueryBuilder.JoinWhereOperation.AND)
                         .join(ruleDao.queryBuilder().setAlias("rule")
                                         .join(moduleDao.queryBuilder().setAlias("module"), QueryBuilder.JoinType.LEFT, QueryBuilder.JoinWhereOperation.AND)
@@ -196,14 +197,21 @@ public final class PBHPeerController extends AbstractFeatureModule {
         activeMonitoringModule.flush();
         String ip = IPAddressUtil.getIPAddress(ctx.pathParam("ip")).toNormalizedString();
         Pageable pageable = new Pageable(ctx);
-        var builder = new Orderable(Map.of("lastTimeSeen", false, "address", false, "port", true), ctx).apply(peerRecordDao.queryBuilder());
+        var builder = new Orderable(Map.of("lastTimeSeen", false, "address", false, "port", true), ctx)
+                .addMapping("torrent.name", "torrentName")
+                .addMapping("torrent.infoHash", "torrentInfoHash")
+                .addMapping("torrent.size", "torrentSize")
+                .apply(peerRecordDao.queryBuilder()
+                        .join(torrentDao.queryBuilder().setAlias("torrent"), QueryBuilder.JoinType.LEFT, QueryBuilder.JoinWhereOperation.AND));
         var where = builder
                 .where()
                 .eq("address", new SelectArg(ip));
         builder.setWhere(where);
         var page = peerRecordDao.queryByPaging(builder, pageable);
-        ctx.json(new StdResp(true, null, Page.map(page, (entity) -> new PeerRecordEntityDTO(entity.getId(),
-                HostAndPort.fromParts(entity.getAddress(), entity.getPort()).toString(),
+        ctx.json(new StdResp(true, null, Page.map(page, (entity) -> new PeerRecordEntityDTO(
+                entity.getId(),
+                entity.getAddress(),
+                entity.getPort(),
                 TorrentEntityDTO.from(entity.getTorrent()),
                 downloaderManager.getDownloadInfo(entity.getDownloader()),
                 entity.getPeerId(),

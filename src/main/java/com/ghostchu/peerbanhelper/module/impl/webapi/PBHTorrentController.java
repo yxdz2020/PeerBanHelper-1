@@ -17,7 +17,6 @@ import com.ghostchu.peerbanhelper.util.query.Pageable;
 import com.ghostchu.peerbanhelper.web.JavalinWebContainer;
 import com.ghostchu.peerbanhelper.web.Role;
 import com.ghostchu.peerbanhelper.web.wrapper.StdResp;
-import com.google.common.net.HostAndPort;
 import com.j256.ormlite.stmt.QueryBuilder;
 import com.j256.ormlite.stmt.SelectArg;
 import io.javalin.http.Context;
@@ -95,6 +94,7 @@ public final class PBHTorrentController extends AbstractFeatureModule {
                         .addMapping("torrent.size", "torrentSize")
                         .addMapping("module.name", "module")
                         .addMapping("rule.rule", "rule")
+                        .addMapping("ip", "peerIp")
                         .apply(
                         historyDao.queryBuilder()
                                 .where()
@@ -113,21 +113,47 @@ public final class PBHTorrentController extends AbstractFeatureModule {
 
     private void handleTorrentQuery(Context ctx) throws SQLException {
         Pageable pageable = new Pageable(ctx);
-        Page<TorrentEntity> torrentEntityPage;
-        if (ctx.queryParam("keyword") == null) {
-            torrentEntityPage = torrentDao.queryByPaging(
-                    new Orderable(Map.of("id", false), ctx).apply(torrentDao.queryBuilder()),
-                    pageable);
-        } else {
-            torrentEntityPage = torrentDao.queryByPaging(
-                    new Orderable(Map.of("id", false), ctx).apply(torrentDao.queryBuilder()
-                            .where()
-                            .like("name", new SelectArg("%" + ctx.queryParam("keyword") + "%"))
-                            .or()
-                            .like("infoHash", new SelectArg("%" + ctx.queryParam("keyword") + "%"))
-                            .queryBuilder())
-                    , pageable);
+
+        // 检查是否需要按计数字段排序
+        boolean needsCountSort = false;
+        String countSortField = null;
+        boolean countSortAscending = true;
+
+        for (String orderByParam : ctx.queryParams("orderBy")) {
+            String[] parts = orderByParam.split("\\|");
+            String field = parts[0];
+            if ("peerBanCount".equals(field) || "peerAccessCount".equals(field)) {
+                needsCountSort = true;
+                countSortField = field;
+                countSortAscending = parts.length < 2 || (!parts[1].equalsIgnoreCase("desc") && !parts[1].equalsIgnoreCase("descend"));
+                break;
+            }
         }
+
+        Page<TorrentEntity> torrentEntityPage;
+        QueryBuilder<TorrentEntity, Long> qb = torrentDao.queryBuilder();
+        // 添加搜索条件
+        if (ctx.queryParam("keyword") != null) {
+            qb.where()
+                    .like("name", new SelectArg("%" + ctx.queryParam("keyword") + "%"))
+                    .or()
+                    .like("infoHash", new SelectArg("%" + ctx.queryParam("keyword") + "%"));
+        }
+        if (needsCountSort) {
+            // 使用 SQL 子查询进行排序
+            String subQueryTable = "peerBanCount".equals(countSortField) ? "history" : "peer_record";
+            String sortDirection = countSortAscending ? "ASC" : "DESC";
+            // 使用 orderByRaw 添加子查询排序
+            // 注意：使用实际表名 'torrents' 而不是别名 'torrent'
+            qb.orderByRaw("(SELECT COUNT(*) FROM " + subQueryTable +
+                    " WHERE " + subQueryTable + ".torrent_id = torrents.id) " + sortDirection);
+        } else {
+            // 普通排序（按数据库字段）
+            new Orderable(Map.of("id", false), ctx).apply(qb);
+        }
+        torrentEntityPage = torrentDao.queryByPaging(qb, pageable);
+
+        // 构建结果列表（始终需要查询计数）
         List<TorrentInfoDTO> infoList = new ArrayList<>();
         for (TorrentEntity result : torrentEntityPage.getResults()) {
             var peerBanCount = historyDao.queryBuilder()
@@ -135,7 +161,6 @@ public final class PBHTorrentController extends AbstractFeatureModule {
                     .eq("torrent_id", result.getId())
                     .countOf();
             var peerAccessCount = peerRecordDao.queryBuilder()
-                    .orderBy("lastTimeSeen", false)
                     .where()
                     .eq("torrent_id", result.getId())
                     .countOf();
@@ -182,7 +207,8 @@ public final class PBHTorrentController extends AbstractFeatureModule {
         queryBuilder.where().eq("torrent_id", t);
         Page<PeerRecordEntity> page = peerRecordDao.queryByPaging(queryBuilder, pageable);
         ctx.json(new StdResp(true, null,  Page.map(page, (entity)-> new PeerRecordEntityDTO(entity.getId(),
-                HostAndPort.fromParts(entity.getAddress(), entity.getPort()).toString(),
+                entity.getAddress(),
+                entity.getPort(),
                 TorrentEntityDTO.from(entity.getTorrent()),
                 downloaderManager.getDownloadInfo(entity.getDownloader()),
                 entity.getPeerId(),
