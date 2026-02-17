@@ -44,7 +44,7 @@ public class PCBRangeServiceImpl extends AbstractCommonService<PCBRangeMapper, P
 
 	@Override
     public long cleanupDatabase(OffsetDateTime timestamp) {
-        return spiltBatchDelete(new LambdaQueryWrapper<PCBRangeEntity>()
+        return splitBatchDelete(new LambdaQueryWrapper<PCBRangeEntity>()
                 .select(PCBRangeEntity::getId)
                 .lt(PCBRangeEntity::getLastTimeSeen, timestamp));
 	}

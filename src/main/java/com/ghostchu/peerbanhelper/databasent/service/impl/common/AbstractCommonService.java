@@ -16,31 +16,31 @@ import org.jetbrains.annotations.NotNull;
 public class AbstractCommonService<M extends BaseMapper<T>, T> extends ServiceImpl<M, T> {
     private static final String LAST_LIMIT = "LIMIT 200";
 
-    public long spiltBatchDelete(@NotNull QueryWrapper<T> wrapper) {
-        return spiltBatchDelete0(wrapper.last(LAST_LIMIT));
+    public long splitBatchDelete(@NotNull QueryWrapper<T> wrapper) {
+        return splitBatchDelete0(wrapper.last(LAST_LIMIT));
     }
 
-    public long spiltBatchDelete(@NotNull QueryChainWrapper<T> wrapper) {
-        return spiltBatchDelete0(wrapper.last(LAST_LIMIT));
+    public long splitBatchDelete(@NotNull QueryChainWrapper<T> wrapper) {
+        return splitBatchDelete0(wrapper.last(LAST_LIMIT));
     }
 
-    public long spiltBatchDelete(@NotNull KtQueryWrapper<T> wrapper) {
-        return spiltBatchDelete0(wrapper.last(LAST_LIMIT));
+    public long splitBatchDelete(@NotNull KtQueryWrapper<T> wrapper) {
+        return splitBatchDelete0(wrapper.last(LAST_LIMIT));
     }
 
-    public long spiltBatchDelete(@NotNull KtQueryChainWrapper<T> wrapper) {
-        return spiltBatchDelete0(wrapper.last(LAST_LIMIT));
+    public long splitBatchDelete(@NotNull KtQueryChainWrapper<T> wrapper) {
+        return splitBatchDelete0(wrapper.last(LAST_LIMIT));
     }
 
-    public long spiltBatchDelete(@NotNull LambdaQueryWrapper<T> wrapper) {
-        return spiltBatchDelete0(wrapper.last(LAST_LIMIT));
+    public long splitBatchDelete(@NotNull LambdaQueryWrapper<T> wrapper) {
+        return splitBatchDelete0(wrapper.last(LAST_LIMIT));
     }
 
-    public long spiltBatchDelete(@NotNull LambdaQueryChainWrapper<T> wrapper) {
-        return spiltBatchDelete0(wrapper.last(LAST_LIMIT));
+    public long splitBatchDelete(@NotNull LambdaQueryChainWrapper<T> wrapper) {
+        return splitBatchDelete0(wrapper.last(LAST_LIMIT));
     }
 
-    private long spiltBatchDelete0(@NotNull Wrapper<T> wrapper) {
+    private long splitBatchDelete0(@NotNull Wrapper<T> wrapper) {
         long deleted = 0;
         int lastDeleted;
         do {

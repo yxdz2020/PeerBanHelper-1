@@ -165,7 +165,7 @@ public class PeerRecordServiceImpl extends AbstractCommonService<PeerRecordMappe
 
     @Override
     public long cleanup(@NotNull OffsetDateTime before) {
-        return spiltBatchDelete(new LambdaQueryWrapper<PeerRecordEntity>().lt(PeerRecordEntity::getLastTimeSeen, before));
+        return splitBatchDelete(new LambdaQueryWrapper<PeerRecordEntity>().lt(PeerRecordEntity::getLastTimeSeen, before));
     }
 
 
