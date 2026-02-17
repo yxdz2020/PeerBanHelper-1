@@ -42,7 +42,7 @@ public final class AlertManagerImpl implements AlertManager {
     }
 
     private void cleanup() {
-        int removed = this.alertDao.deleteOldAlerts(OffsetDateTime.now().minusDays(30));
+        long removed = this.alertDao.deleteOldAlerts(OffsetDateTime.now().minusDays(30));
         log.info(tlUI(Lang.ALERT_MANAGER_CLEAN_UP, removed));
     }
 
