@@ -306,7 +306,7 @@ public abstract class AbstractQbittorrent extends AbstractDownloader {
         flags.add(DownloaderFeatureFlag.UNBAN_IP);
         flags.add(DownloaderFeatureFlag.TRAFFIC_STATS);
         flags.add(DownloaderFeatureFlag.LIVE_UPDATE_BT_PROTOCOL_PORT);
-        if ((lastSemver.isEqualTo("5.2.0-beta1") || lastSemver.isGreaterThanOrEqualTo("5.3.0")) && ExternalSwitch.parseBoolean("pbh.downloader.qBittorrent.enableRangeBanIp", true)) {
+        if ((lastSemver.isGreaterThanOrEqualTo("5.3.0") || lastSemver.isEqualTo("5.2.0-beta1")) && ExternalSwitch.parseBoolean("pbh.downloader.qBittorrent.enableRangeBanIp", true)) {
             flags.add(DownloaderFeatureFlag.RANGE_BAN_IP);
         }
         return flags;
