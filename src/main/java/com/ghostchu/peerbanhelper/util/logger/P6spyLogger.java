@@ -4,6 +4,7 @@ import com.ghostchu.peerbanhelper.ExternalSwitch;
 import com.ghostchu.peerbanhelper.util.MiscUtil;
 import com.ghostchu.peerbanhelper.util.SentryUtils;
 import com.google.common.collect.EvictingQueue;
+import com.google.common.collect.Queues;
 import com.p6spy.engine.logging.Category;
 import com.p6spy.engine.spy.appender.FormattedLogger;
 import io.sentry.Sentry;
@@ -13,10 +14,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
+import java.util.Queue;
+
 @Slf4j
 public class P6spyLogger extends FormattedLogger {
-    public static final EvictingQueue<@NotNull String> sqlRingQueue = EvictingQueue.create(ExternalSwitch.parseInt("pbh.p6spy.ringqueue.size", 50));
-    public static final EvictingQueue<@NotNull String> writeSqlRingQueue = EvictingQueue.create(ExternalSwitch.parseInt("pbh.p6spy.writeringqueue.size", 30));
+    public static final Queue<@NotNull String> sqlRingQueue =  Queues.synchronizedQueue(EvictingQueue.create(ExternalSwitch.parseInt("pbh.p6spy.ringqueue.size", 50)));
+    public static final Queue<@NotNull String> writeSqlRingQueue =  Queues.synchronizedQueue(EvictingQueue.create(ExternalSwitch.parseInt("pbh.p6spy.writeringqueue.size", 30)));
 
     @Override
     public void logException(Exception e) {
@@ -32,7 +35,7 @@ public class P6spyLogger extends FormattedLogger {
     public void logSQL(int connectionId, String now, long elapsed, Category category, @Nullable String prepared, String sql, String url) {
         String loggingSQL = "[" + category.getName() + "] " + prepared + " | " + elapsed + " ms";
         sqlRingQueue.add(loggingSQL);
-        if(prepared != null) {
+        if (prepared != null) {
             if (!prepared.startsWith("SELECT") && (prepared.startsWith("INSERT") // 这里检查一个 SELECT 以便快速命中绝大部分查询，避免遍历所有条件
                     || prepared.startsWith("UPDATE")
                     || prepared.startsWith("DELETE")
