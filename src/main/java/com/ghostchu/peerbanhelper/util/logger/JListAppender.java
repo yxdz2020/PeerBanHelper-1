@@ -60,9 +60,7 @@ public final class JListAppender extends AppenderBase<ILoggingEvent> {
                     slf4jLevel,
                     formattedMessage.trim(),
                     seqNumber);
-            synchronized (logEntryDeque) {
-                logEntryDeque.add(postAccessLog);
-            }
+            logEntryDeque.add(postAccessLog);
         }
         String messageBody = formattedMessage.trim();
         if (formattedMessage.startsWith("[")) {
@@ -79,9 +77,7 @@ public final class JListAppender extends AppenderBase<ILoggingEvent> {
                 slf4jLevel,
                 messageBody,
                 seqNumber);
-        synchronized (ringDeque) {
-            ringDeque.add(rawLog);
-        }
+        ringDeque.add(rawLog);
         Main.getEventBus().post(new NewLogEntryCreatedEvent(rawLog));
     }
 }
