@@ -73,7 +73,7 @@ public class P6spyLogger extends FormattedLogger {
         }
     }
 
-    public String pollSqls(Queue<String> queue) {
+    public String pollSqls(Queue<String> queue) { // 这个方法其实也有可能并发，获取到不完整的队列内容。但是无伤大雅，比起上个锁直接堵住 logSQL，不完整反而更容易接受，因为是出于调试目的
         StringBuilder sb = new StringBuilder();
         do {
             String sql = queue.poll();
