@@ -239,7 +239,6 @@ public class Main {
             sentryOptions.addIgnoredExceptionForType(ConnectException.class);
             sentryOptions.addIgnoredExceptionForType(UnknownHostException.class);
             sentryOptions.addIgnoredExceptionForType(NoRouteToHostException.class);
-            sentryOptions.setDebug(true);
         });
     }
 
