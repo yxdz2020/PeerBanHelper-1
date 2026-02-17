@@ -125,13 +125,11 @@ public abstract class AbstractQbittorrent extends AbstractDownloader {
 
             try (Response response = httpClient.newCall(request).execute()) {
                 if (response.isSuccessful() && isLoggedIn()) {
-                    updatePreferences();
-                    Semver semver = getDownloaderVersion();
-                    this.lastSemver = semver;
-                    if (semver.isGreaterThanOrEqualTo(new Semver("4.5.0")) || ExternalSwitch.parseBoolean("pbh.downloader.qBittorrent.bypassVersionCheck", false)) {
+                    updateAndApplyMetadataIfRequired();
+                    if (lastSemver.isGreaterThanOrEqualTo(new Semver("4.5.0")) || ExternalSwitch.parseBoolean("pbh.downloader.qBittorrent.bypassVersionCheck", false)) {
                         return new DownloaderLoginResult(DownloaderLoginResult.Status.SUCCESS, new TranslationComponent(Lang.STATUS_TEXT_OK));
                     } else {
-                        return new DownloaderLoginResult(DownloaderLoginResult.Status.REQUIRE_TAKE_ACTIONS, new TranslationComponent(Lang.DOWNLOADER_VERSION_INCOMPATIBLE, semver.toString(), ">= 4.5.0"));
+                        return new DownloaderLoginResult(DownloaderLoginResult.Status.REQUIRE_TAKE_ACTIONS, new TranslationComponent(Lang.DOWNLOADER_VERSION_INCOMPATIBLE, lastSemver.toString(), ">= 4.5.0"));
                     }
                 }
                 return new DownloaderLoginResult(DownloaderLoginResult.Status.INCORRECT_CREDENTIAL, new TranslationComponent(Lang.DOWNLOADER_LOGIN_EXCEPTION, response.body().string()));
@@ -152,7 +150,7 @@ public abstract class AbstractQbittorrent extends AbstractDownloader {
                 if (versionStr.startsWith("v")) {
                     versionStr = versionStr.substring(1);
                 }
-                return new Semver(versionStr);
+                return new Semver(normalizeVersion(versionStr), Semver.SemverType.LOOSE);
             } else {
                 throw new IllegalStateException("Failed to get qBittorrent version: statusCode=" + response.code());
             }
@@ -211,13 +209,21 @@ public abstract class AbstractQbittorrent extends AbstractDownloader {
                     return false;
                 }
                 boolean loggedIn = !info.getLibtorrent().isBlank();
-                if (loggedIn && getLastStatus() != DownloaderLastStatus.HEALTHY) {
-                    updatePreferences();
+                if (loggedIn) {
+                    updateAndApplyMetadataIfRequired();
                 }
                 return loggedIn;
             }
         } catch (Exception e) {
             return false;
+        }
+    }
+
+
+    public void updateAndApplyMetadataIfRequired() {
+        if (getLastStatus() != DownloaderLastStatus.HEALTHY) {
+            updatePreferences();
+            this.lastSemver = getDownloaderVersion();
         }
     }
 
@@ -300,7 +306,7 @@ public abstract class AbstractQbittorrent extends AbstractDownloader {
         flags.add(DownloaderFeatureFlag.UNBAN_IP);
         flags.add(DownloaderFeatureFlag.TRAFFIC_STATS);
         flags.add(DownloaderFeatureFlag.LIVE_UPDATE_BT_PROTOCOL_PORT);
-        if (lastSemver.isGreaterThanOrEqualTo("5.3.0") && ExternalSwitch.parseBoolean("pbh.downloader.qBittorrent.enableRangeBanIp", true)) {
+        if (lastSemver.isGreaterThanOrEqualTo("5.2.0-beta1") && ExternalSwitch.parseBoolean("pbh.downloader.qBittorrent.enableRangeBanIp", true)) {
             flags.add(DownloaderFeatureFlag.RANGE_BAN_IP);
         }
         return flags;
@@ -642,11 +648,12 @@ public abstract class AbstractQbittorrent extends AbstractDownloader {
     protected void setBanListFull(Collection<IPAddress> bannedAddresses) {
         // todo change this with compatibility check after qbiitorrent merge it
         String banStr;
-        if(getFeatureFlags().contains(DownloaderFeatureFlag.RANGE_BAN_IP)) {banStr = bannedAddresses.stream()
-                .map(ipAddr -> remapBanListAddress(ipAddr).toNormalizedString())
-                .distinct()
-                .collect(Collectors.joining("\n"));
-        }else {
+        if (getFeatureFlags().contains(DownloaderFeatureFlag.RANGE_BAN_IP)) {
+            banStr = bannedAddresses.stream()
+                    .map(ipAddr -> remapBanListAddress(ipAddr).toNormalizedString())
+                    .distinct()
+                    .collect(Collectors.joining("\n"));
+        } else {
             StringJoiner joiner = new StringJoiner("\n");
             bannedAddresses.stream().distinct().forEach(ipAddr -> {
                 joiner.add(ipAddr.toNormalizedString());
@@ -737,6 +744,27 @@ public abstract class AbstractQbittorrent extends AbstractDownloader {
             }
         } catch (Exception e) {
             throw new IllegalStateException(e);
+        }
+    }
+
+    @NotNull
+    private String normalizeVersion(@NotNull String unprocessed) {
+        unprocessed = unprocessed.trim();
+        StringBuilder sb = new StringBuilder();
+        StringBuilder suffix = new StringBuilder();
+        boolean reachSuffix = false;
+        for (char c : unprocessed.toCharArray()) {
+            if (!reachSuffix && (Character.isDigit(c) || c == '.')) {
+                sb.append(c);
+            } else {
+                reachSuffix = true;
+                suffix.append(c);
+            }
+        }
+        if (suffix.isEmpty()) {
+            return sb.toString();
+        } else {
+            return sb + "-" + suffix; // make semver happy :)
         }
     }
 
