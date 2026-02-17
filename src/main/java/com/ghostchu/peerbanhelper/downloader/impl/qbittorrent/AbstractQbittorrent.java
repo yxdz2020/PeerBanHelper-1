@@ -767,9 +767,12 @@ public abstract class AbstractQbittorrent extends AbstractDownloader {
         }
         if (suffix.isEmpty()) {
             return sb.toString();
-        } else {
-            return sb + "-" + suffix; // make semver happy :)
         }
+        String suffixStr = suffix.toString();
+        if (suffixStr.startsWith("-") || suffixStr.startsWith("+")) {
+            return sb + suffixStr;
+        }
+        return sb + "-" + suffixStr;
     }
 
     @Override
