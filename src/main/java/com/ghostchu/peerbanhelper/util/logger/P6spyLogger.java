@@ -61,12 +61,8 @@ public class P6spyLogger extends FormattedLogger {
                 event.setExtra("stacktrace", MiscUtil.getAllThreadTrace());
                 if (ExternalSwitch.parseBoolean("pbh.p6spy.logsqlwithsentry", false)) { // do not upload sql by default
                     event.setExtra("sql", sql);
-                    synchronized (writeSqlRingQueue) {
-                        event.setExtra("recent_write_queries", String.join("\n", writeSqlRingQueue));
-                    }
-                    synchronized (sqlRingQueue) {
-                        event.setExtra("recent_all_queries", String.join("\n", sqlRingQueue));
-                    }
+                    event.setExtra("recent_write_queries", pollSqls(writeSqlRingQueue));
+                    event.setExtra("recent_all_queries", pollSqls(sqlRingQueue));
                 }
                 event.setThreads(SentryUtils.getSentryThreads());
                 Sentry.captureEvent(event);
@@ -75,6 +71,16 @@ public class P6spyLogger extends FormattedLogger {
         } catch (Throwable th) { // make sure SQL can execute even exception fired
             Sentry.captureException(th);
         }
+    }
+
+    public String pollSqls(Queue<String> queue) {
+        StringBuilder sb = new StringBuilder();
+        do {
+            String sql = queue.poll();
+            if (sql == null) break;
+            sb.append(sql).append("\n");
+        } while (true);
+        return sb.toString();
     }
 
     @Override
