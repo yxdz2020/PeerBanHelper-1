@@ -7,7 +7,6 @@ import ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy;
 import com.ghostchu.peerbanhelper.config.MainConfigUpdateScript;
 import com.ghostchu.peerbanhelper.config.PBHConfigUpdater;
 import com.ghostchu.peerbanhelper.config.ProfileUpdateScript;
-import com.ghostchu.peerbanhelper.configuration.DatabaseDriverConfig;
 import com.ghostchu.peerbanhelper.event.program.PBHShutdownEvent;
 import com.ghostchu.peerbanhelper.exchange.ExchangeMap;
 import com.ghostchu.peerbanhelper.gui.PBHGuiManager;
@@ -215,10 +214,10 @@ public class Main {
             sentryOptions.setAttachThreads(true);
             sentryOptions.setPrintUncaughtStackTrace(true);
             sentryOptions.setEnableUncaughtExceptionHandler(true);
-            sentryOptions.setSampleRate(ExternalSwitch.parseDouble("sentry.samplerate", 0.1d));
-            sentryOptions.setProfilesSampleRate(ExternalSwitch.parseDouble("sentry.profilessamplerate", 0.1d));
-            sentryOptions.setTracesSampleRate(ExternalSwitch.parseDouble("sentry.tracesamplerate", 0.1d));
-            sentryOptions.setProfileSessionSampleRate(ExternalSwitch.parseDouble("sentry.profilesessionsamplerate", 0.1d));
+            sentryOptions.setSampleRate(ExternalSwitch.parseDouble("sentry.samplerate", 0.2d));
+            sentryOptions.setProfilesSampleRate(ExternalSwitch.parseDouble("sentry.profilessamplerate", 0.2d));
+            sentryOptions.setTracesSampleRate(ExternalSwitch.parseDouble("sentry.tracesamplerate", 0.2d));
+            sentryOptions.setProfileSessionSampleRate(ExternalSwitch.parseDouble("sentry.profilesessionsamplerate", 0.2d));
             sentryOptions.setEnableUserInteractionTracing(false); // Do not tracker user behavior
             sentryOptions.setRelease(meta.getVersion());
             sentryOptions.setTag("os", System.getProperty("os.name"));
@@ -240,6 +239,7 @@ public class Main {
             sentryOptions.addIgnoredExceptionForType(ConnectException.class);
             sentryOptions.addIgnoredExceptionForType(UnknownHostException.class);
             sentryOptions.addIgnoredExceptionForType(NoRouteToHostException.class);
+            sentryOptions.setDebug(true);
         });
     }
 
