@@ -203,7 +203,7 @@ public class Main {
 
     private static void setupSentry() {
         Sentry.init(sentryOptions -> {
-            sentryOptions.setDsn(ExternalSwitch.parse("sentry.dsn", "https://ca1d50ff6c96410f916febf500cc1b54@glitchtip.pbh-btn.com/5"));
+            sentryOptions.setDsn(ExternalSwitch.parse("sentry.dsn", "https://8c37f36e8a0244279b1142e4b82eb81a@glitchtip.pbh-btn.com/1"));
             sentryOptions.setEnableExternalConfiguration(true); // Read DSN from sentry.properties
             sentryOptions.setCacheDirPath(cacheDirectory.getAbsolutePath());
             sentryOptions.setEnabled(mainConfig.getBoolean("privacy.analytics")); // Disable Sentry if analytics is disabled in config
